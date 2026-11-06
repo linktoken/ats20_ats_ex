@@ -1,7 +1,7 @@
 # ATS_EX v1.18m — modified firmware for the ATS-20 / ATS-20+ receiver
 
 This is a fork of **[goshante/ats20_ats_ex](https://github.com/goshante/ats20_ats_ex)** (ATS_EX v1.18 by Goshante) for the ATS-20 (Si4732 + ATmega328P) receiver.
-It adds bug fixes, a battery voltage display, memory presets, an FM stereo indicator, an RDS clock and more. It also includes the upstream fix from PR #33.
+It adds bug fixes, a battery voltage display, an FM stereo indicator, an RDS clock, memory presets (USBasp version) and more. It also includes the upstream fix from PR #33.
 
 The original user manual still applies; see **[README_ORIGINAL.md](README_ORIGINAL.md)** ([Russian](rus/README.md)). This page lists only what's **new or different** in v1.18m.
 
@@ -31,10 +31,10 @@ You can also build them yourself (see [Building](#building)).
 ### New features
 | Feature | Description | USB | USBasp |
 |---|---|:-:|:-:|
-| **Battery in volts** | Lower-right corner shows battery voltage, e.g. `3.9V`. Setting **Bat** switches between `V` and `%`. | ✅ | ✅ |
-| **Low battery warning** | The battery value is shown **inverted** (white box) when the battery drops below **3.30 V**. | ✅ | ✅ |
+| **Battery in volts** | Lower-right corner shows battery voltage, e.g. `3.9V`. Setting **Bat** switches between `V` and `%`. Needs the [A1 battery mod](#hardware-battery-voltage-monitor-a1). | ✅ | ✅ |
+| **Low battery warning** | The battery value is shown **inverted** (white box) when the battery drops below **3.30 V**. Needs the A1 battery mod. | ✅ | ✅ |
 | **FM stereo indicator** | The top line shows `FM ST` while a stereo station is received. | ✅ | ✅ |
-| **Signal numbers in S-meter** | The S-meter line shows bars plus numbers: `||||||  R45 SN12` = RSSI 45 dBµV, SNR 12 dB. | — (bars) | ✅ |
+| **Signal numbers in S-meter** | The S-meter line shows bars plus numbers: `||||||  R45 SN12` = RSSI 45 dBµV, SNR 12 dB. The USB version has the S-meter too, but with bars only (see [S-meter](#s-meter)). | — | ✅ |
 | **Screen-off timer** | Setting **Dsp**: turn the display off after 10…120 s without use (0 = never). Any key or encoder turn wakes it up; that key does nothing else. | ✅ | ✅ |
 | **More SW band jumps** | BAND+/BAND− in SW now steps through all broadcast bands (120 m … 11 m) as well as the ham bands. | ✅ | ✅ |
 | **New boot screen** | Shows the version and a loading bar. | ✅ | ✅ |
@@ -64,7 +64,7 @@ You can also build them yourself (see [Building](#building)).
 
 | Action | Result |
 |---|---|
-| **Long-press MODE** | Open memory presets. The lower line shows e.g. `M3  9650k AM` (or `M3 ----` if empty). |
+| **Long-press MODE** | Open memory presets. The lower line shows e.g. `M3  9650k  AM` or `M3  87.50M  FM`, or `M3 ----` if the slot is empty. |
 | **Turn encoder** | Choose slot **M0 … M9**. |
 | **Press encoder** | **Recall** the selected slot (band, mode and frequency). |
 | **Short-press MODE** | **Store** the current station in the selected slot. |
@@ -79,10 +79,14 @@ Short-press **MODE** in FM to turn RDS on, then press the **encoder** to cycle t
 The time shows `Time --:--` until the station sends its time signal. Stations send it once a minute, and not all stations send it. After that the radio keeps the time on its own.
 
 ### S-meter
-Long-press **STEP** as before. The USB version shows 16 bars, as in the original firmware. The USBasp version uses the new layout `||||||||R45 SN12`:
-- 8 bars for 0…64 dBµV
-- **R** = RSSI in dBµV
-- **SN** = signal-to-noise ratio in dB
+Shows the **signal strength** of the tuned station (RSSI from the Si4732) on the lower line. **Long-press STEP** to turn it on or off, as before. It updates 10 times per second and is handy for aiming the antenna or comparing antennas.
+
+| Version | Display | Scale |
+|---|---|---|
+| **USB** | `||||||||||      ` (16 bars, as in the original firmware) | 1 bar = 4 dBµV, full at 64 dBµV |
+| **USBasp** | `||||||  R45 SN12` (8 bars + numbers) | 1 bar = 8 dBµV, full at 64 dBµV. **R** = RSSI in dBµV, **SN** = signal-to-noise ratio in dB |
+
+This is a relative strength scale, not calibrated S-units. The SNR value is often the better guide to whether a station will sound clean.
 
 ### New settings (page 3)
 | Name | Values | Default | Meaning |
@@ -94,7 +98,7 @@ Long-press **STEP** as before. The USB version shows 16 bars, as in the original
 
 ## Hardware: battery voltage monitor (A1)
 
-Battery monitoring needs a small hardware mod (same as the original firmware), but this version reads **A1** instead of A2.
+A stock ATS-20 has no connection from the battery to an analog pin, so the battery display needs a small hardware mod. It's the same mod as for the original firmware, but this version reads **A1** instead of A2.
 
 ```
 Battery + ──[10 kΩ]──┬──[10 kΩ]── GND
@@ -102,7 +106,8 @@ Battery + ──[10 kΩ]──┬──[10 kΩ]── GND
                      └── A1 (ATmega328P / Arduino pin A1)
 ```
 
-If no divider is connected (A1 reads low at power-on), the battery indicator stays hidden.
+- **Without the mod:** the firmware checks A1 at power-on and hides the battery indicator if it reads low. An unconnected A1 can float, though, so the radio may sometimes show a random value. Fitting the divider fixes this.
+- **Battery drain:** the divider draws about 0.2 mA. If you connect it before the power switch, it slowly drains the battery while the radio is off. Connect it after the switch if your board allows.
 
 **Calibration:** the reading assumes the ATmega runs at **3.30 V** and a **1:2** divider. If your voltage is off, measure the ATmega supply voltage with a multimeter and edit `ATS_EX/defs.h`:
 ```c
@@ -157,17 +162,18 @@ Connect the USBasp's 6-pin (or 10-pin) ISP cable to the ATmega328P ISP pins: the
 Plug in the USBasp, run **[Zadig](https://zadig.akeo.ie/)**, select **USBasp**, and install the **libusbK** or **WinUSB** driver.
 
 ### 3. Flash
-With the ready-made hex (Arduino IDE installed, which includes avrdude):
+With **flash.ps1** from this repo (uses the avrdude that comes with Arduino IDE):
 ```powershell
-.\flash.ps1
+.\flash.ps1 -Hex ATS_EX_v1.18m.hex     # release file
+.\flash.ps1                            # or your own build: build\ATS_EX.ino.hex
 ```
-Or with avrdude directly:
+Or with **avrdude** directly:
 ```bash
 avrdude -c usbasp -p m328p -B 10 -U flash:w:ATS_EX_v1.18m.hex:i
 ```
-`flash.ps1` expects the hex at `build\ATS_EX.ino.hex`. Run `build.ps1` first, or copy the release file there with that name.
 
-Fuses are **not** changed. ISP flashing **erases the USB bootloader**, so later updates also need the USBasp. You can burn the bootloader back with Arduino IDE → *Burn Bootloader*, but then v1.18m no longer fits.
+Fuses are **not** changed. ISP flashing **erases the USB bootloader**, so later updates also need the USBasp.
+To go back to USB flashing, burn the bootloader again (Arduino IDE → *Tools → Burn Bootloader* with the USBasp), then use the **USB version**.
 
 ### 4. Reset settings
 After flashing, **hold the encoder button while switching the radio on** (EEPROM reset). Memory presets are kept.
@@ -196,27 +202,33 @@ The USB version is the same source built with `-DUSB_BUILD=1`, which turns off `
 | `FEATURE_STEREO` | ~145 B |
 | `FEATURE_SMETER_NUMBERS` | ~80 B |
 
-For example, to build with memory presets but no RDS clock (this is still too big for USB):
-```powershell
-arduino-cli compile ... --build-property "compiler.cpp.extra_flags=-mcall-prologues -mrelax -DFEATURE_RDS_CLOCK=0"
-```
-To stay USB-flashable, keep the size at **30,720 bytes or less**.
+To change features, either edit the switches in `defs.h`, or pass them as `-D` flags (see below). To stay USB-flashable, keep the size at **30,720 bytes or less**. For example, memory presets without the RDS clock is about 31.1 KB, which is still too big for USB.
 
-`build.ps1` compiles with `-mcall-prologues -mrelax`, which saves about 750 bytes, and allows the full 32 KB.
-A plain Arduino IDE build is **too big**, because the IDE doesn't use these flags and reserves space for the bootloader.
+`build.ps1` compiles with `-mcall-prologues -mrelax`, which saves about 750 bytes. It allows 32,768 bytes for the full build (no bootloader) and 30,720 bytes for `-Usb`.
+A plain Arduino IDE build is **too big**: the IDE doesn't use these flags, and it reserves space for the bootloader.
 
-Equivalent arduino-cli command (any OS):
+Equivalent arduino-cli commands (any OS):
 ```bash
+# Full version (USBasp)
 arduino-cli compile -b arduino:avr:uno --output-dir build \
   --build-property "compiler.c.extra_flags=-mcall-prologues -mrelax" \
   --build-property "compiler.cpp.extra_flags=-mcall-prologues -mrelax" \
   --build-property "compiler.c.elf.extra_flags=-mcall-prologues -mrelax" \
   --build-property "upload.maximum_size=32768" \
   ATS_EX
+
+# USB version (add -DUSB_BUILD=1, limit 30720)
+arduino-cli compile -b arduino:avr:uno --output-dir build-usb \
+  --build-property "compiler.c.extra_flags=-mcall-prologues -mrelax -DUSB_BUILD=1" \
+  --build-property "compiler.cpp.extra_flags=-mcall-prologues -mrelax -DUSB_BUILD=1" \
+  --build-property "compiler.c.elf.extra_flags=-mcall-prologues -mrelax" \
+  --build-property "upload.maximum_size=30720" \
+  ATS_EX
 ```
+For your own feature set, add flags such as `-DFEATURE_RDS_CLOCK=0` to both `extra_flags` lines.
 
 Options in `ATS_EX/defs.h`:
-- `USE_RDS 0` builds without RDS, about 1.3 KB smaller.
+- `USE_RDS 0` builds without RDS, which also removes the RDS clock.
 - `BATTERY_*` values for calibration.
 - `EEPROM_MEMORY_ADDRESS` / `MEMORY_SLOTS` for the presets.
 
@@ -224,7 +236,9 @@ Options in `ATS_EX/defs.h`:
 
 ## Known limitations
 - With **CPU 50 %** enabled, the screen-off timer runs twice as slow, and the RDS clock compensates only roughly.
+- The RDS clock only works on stations that broadcast RDS time (CT), which many don't. It can take a minute or two to appear.
 - Memory presets store SSB frequencies rounded to 1 kHz.
+- The USB version has only 72 bytes of flash left, so new features would need something else turned off.
 - Not tested on every ATS-20 hardware revision. Please report issues.
 
 ---
