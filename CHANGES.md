@@ -27,10 +27,18 @@ Note: long-press MODE no longer acts like a short press (it opens memory presets
 - `USE_RDS 0` build works again.
 
 ## Two versions
-- **Full (USBasp):** 31,438 / 32,768 bytes, no bootloader. `build.ps1`, flash with `flash.ps1`.
-- **USB:** 30,648 / 30,720 bytes, keeps the bootloader. Same as full, including the RDS clock, but
+- **Full (USBasp):** 31,464 / 32,768 bytes, no bootloader. `build.ps1`, flash with `flash.ps1`.
+- **USB:** 30,668 / 30,720 bytes, keeps the bootloader. Same as full, including the RDS clock, but
   without memory presets (long-press MODE = short press, as in the original) and with a bars-only
   S-meter. `build.ps1 -Usb`, flash with `flash-usb.ps1 -Port COMx` or XLoader.
 - Feature switches in `defs.h`: `FEATURE_MEMORY`, `FEATURE_RDS_CLOCK`, `FEATURE_SCREEN_TIMEOUT`,
   `FEATURE_STEREO`, `FEATURE_SMETER_NUMBERS` (`USB_BUILD=1` turns off memory and S-meter numbers).
 - RDS clock decodes the raw RDS group 4A (~350 bytes smaller than the library's time functions).
+
+## Fewer start-up pops (not silent)
+- Band configuration was applied twice at boot (in FM: an extra chip power cycle = extra pop). Now once.
+- Chip power-up and band setup run muted before the boot screen; volume fades in at the end.
+- Boot screen without inverted (white) areas: the drop in OLED current when switching to the main
+  screen was audible as a pop.
+- Some pops remain (amplifier power-up, Si4732 power-up, display current); only an external mute
+  circuit on the audio line removes them completely.

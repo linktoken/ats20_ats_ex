@@ -79,11 +79,43 @@ void setup()
     oled.on();
     oled.setFont(DEFAULT_FONT);
 
+    //Every Si4732 power-up makes a pop in the speaker. Do them all right now, at
+    //switch-on, instead of after the boot screen: power up, then set up the saved
+    //band at volume 0 (setAM()/setFM() power-cycle the chip once more, but still
+    //during the switch-on moment).
+    //The boot screen afterwards gives the chip time to settle (replaces the old delay(500)).
+    g_si4735.getDeviceI2CAddress(RESET_PIN);
+    g_si4735.setup(RESET_PIN, MW_BAND_TYPE);
+
     //Don't use digitalRead()
     //Registers save us more space
-    if (!(PINC & (1 << (ENCODER_BUTTON - 14))))
+    bool eepromReset = !(PINC & (1 << (ENCODER_BUTTON - 14)));
+
+    //Load settings from EEPROM
+    //Also reject a corrupted band/mode byte so it can't index past the tables
+    bool eepromValid = !eepromReset
+        && EEPROM.read(EEPROM_VERSION_ADDRESS) == APP_VERSION && EEPROM.read(EEPROM_APP_ID_ADDRESS) == EEPROM_APP_ID
+        && EEPROM.read(EEPROM_DATA_START_ADDRESS + 1) <= g_lastBand && EEPROM.read(EEPROM_DATA_START_ADDRESS + 2) <= FM;
+    if (!eepromValid)
+        saveAllReceiverInformation(); //Defaults. Before muting: it stores the current volume
+
+    //Silent from here until the fade-in at the end; the library re-applies
+    //this volume after every power-up
+    g_si4735.setVolume(0);
+
+    //Set up the band now, once. readAllReceiverInformation() includes the band
+    //configuration (before, it was applied a second time after the boot screen,
+    //which in FM meant another power cycle = another pop).
+    //g_settingsActive keeps it from drawing the main screen under the boot screen.
+    g_settingsActive = true;
+    if (eepromValid)
+        readAllReceiverInformation();
+    else
+        applyBandConfiguration();
+    g_settingsActive = false;
+
+    if (eepromReset)
     {
-        saveAllReceiverInformation();
         oled.print("  EEPROM RESET");
         oled.setCursor(0, 2);
         for (uint8_t i = 0; i < 16; i++)
@@ -94,14 +126,16 @@ void setup()
     }
     else
     {
-        oledPrint(" ATS-20 RECEIVER", 0, 0, DEFAULT_FONT, true);
+        //No inverted (white) areas here: lit OLED pixels draw current, and switching
+        //from a mostly-lit boot screen to the main screen made the speaker pop
+        oledPrint(" ATS-20 RECEIVER", 0, 0, DEFAULT_FONT);
         oledPrint("linktoken v1.18m", 0, 2);
         oledPrint("edit firmware", 12, 4);
-        //Loading bar: 16 solid blocks (inverted spaces) over ~2 s
+        //Loading bar: thin "=" characters over ~2 s
         oled.setCursor(0, 6);
         for (uint8_t i = 0; i < 16; i++)
         {
-            oledPrint(" ", -1, -1, DEFAULT_FONT, true);
+            oled.print("=");
             delay(125);
         }
     }
@@ -111,29 +145,21 @@ void setup()
     attachInterrupt(digitalPinToInterrupt(ENCODER_PIN_A), rotaryEncoder, CHANGE);
     attachInterrupt(digitalPinToInterrupt(ENCODER_PIN_B), rotaryEncoder, CHANGE);
 
-    g_si4735.getDeviceI2CAddress(RESET_PIN);
-    g_si4735.setup(RESET_PIN, MW_BAND_TYPE);
-
-    delay(500);
-
-    //Load settings from EEPROM
-    //Also reject a corrupted band/mode byte so it can't index past the tables
-    if (EEPROM.read(EEPROM_VERSION_ADDRESS) == APP_VERSION && EEPROM.read(EEPROM_APP_ID_ADDRESS) == EEPROM_APP_ID
-        && EEPROM.read(EEPROM_DATA_START_ADDRESS + 1) <= g_lastBand && EEPROM.read(EEPROM_DATA_START_ADDRESS + 2) <= FM)
-        readAllReceiverInformation();
-    else
-        saveAllReceiverInformation();
-
     //Clock speed configuration
     noInterrupts(); //cli()
     CLKPR = 0x80;   //Allow edit CLKPR register
     CLKPR = g_Settings[SettingsIndex::CPUSpeed].param;
     interrupts();   //sei()
 
-    //Initialize current band settings and read frequency
-    applyBandConfiguration();
+    //Read frequency
     g_currentFrequency = g_previousFrequency = g_si4735.getFrequency();
-    g_si4735.setVolume(g_volume);
+
+    //Fade the volume in instead of switching it on at once
+    for (uint8_t v = 0; v <= g_volume; v++)
+    {
+        g_si4735.setVolume(v);
+        delay(4);
+    }
 
     //Draw main screen
     oled.clear();

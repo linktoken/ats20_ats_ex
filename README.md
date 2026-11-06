@@ -38,6 +38,7 @@ You can also build them yourself (see [Building](#building)).
 | **Screen-off timer** | Setting **Dsp**: turn the display off after 10…120 s without use (0 = never). Any key or encoder turn wakes it up; that key does nothing else. | ✅ | ✅ |
 | **More SW band jumps** | BAND+/BAND− in SW now steps through all broadcast bands (120 m … 11 m) as well as the ham bands. | ✅ | ✅ |
 | **New boot screen** | Shows the version and a loading bar. | ✅ | ✅ |
+| **Fewer start-up pops** | The band is set up once instead of twice, muted and before the boot screen, and the sound fades in. The boot screen has no large white areas, which made a pop when it switched to the main screen. Start-up is quieter but not silent (see [Known limitations](#known-limitations)). | ✅ | ✅ |
 | **All bug fixes** | See below. | ✅ | ✅ |
 | **10 memory presets** | Store and recall favourite stations (band, mode, frequency). See [Memory presets](#memory-presets). | — | ✅ |
 | **RDS clock** | A 4th RDS page shows local time `Time hh:mm` from the station's RDS time signal. | ✅ | ✅ |
@@ -238,7 +239,8 @@ Options in `ATS_EX/defs.h`:
 - With **CPU 50 %** enabled, the screen-off timer runs twice as slow, and the RDS clock compensates only roughly.
 - The RDS clock only works on stations that broadcast RDS time (CT), which many don't. It can take a minute or two to appear.
 - Memory presets store SSB frequencies rounded to 1 kHz.
-- The USB version has only 72 bytes of flash left, so new features would need something else turned off.
+- The USB version has only 52 bytes of flash left, so new features would need something else turned off.
+- Some pops at start-up remain. They come from the amplifier getting power, the Si4732 powering up, and the display current changing. Only an external mute circuit on the audio line can remove them completely.
 - Not tested on every ATS-20 hardware revision. Please report issues.
 
 ## Tested on

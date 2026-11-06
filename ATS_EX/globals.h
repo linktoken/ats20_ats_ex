@@ -334,5 +334,6 @@ class ATS_SI4735 : public SI4735
 {
 public:
     const si47x_rds_status& rdsStatus() { return currentRdsStatus; }
+
 };
 ATS_SI4735 g_si4735;
