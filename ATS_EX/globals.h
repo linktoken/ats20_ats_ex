@@ -104,7 +104,9 @@ SettingsItem g_Settings[] =
     { "Sca", 1,  SettingType::Switch,       doScanSwitch      },  //AM Encoder scan switch
     { "CW ", 0,  SettingType::Switch,       doCWSwitch        },  //CW is LSB or USB
     { "Bat", 1,  SettingType::Switch,       doBatUnits        },  //Battery: 0 - percent, 1 - volts
+#if FEATURE_SCREEN_TIMEOUT
     { "Dsp", 0,  SettingType::Num,          doScreenTimeout   },  //Screen off after N seconds (0 - never)
+#endif
 };
 
 enum SettingsIndex
@@ -128,7 +130,9 @@ enum SettingsIndex
     ScanSwitch,
     CWSwitch,
     BatUnits,
+#if FEATURE_SCREEN_TIMEOUT
     ScreenTimeout,
+#endif
     SETTINGS_MAX
 };
 

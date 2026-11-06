@@ -7,30 +7,40 @@ The original user manual still applies; see **[README_ORIGINAL.md](README_ORIGIN
 
 ![ATS-20](img/ats20.png)
 
-> ⚠️ **v1.18m uses ~32.1 KB of flash.** It only fits **without a bootloader**, so it must be flashed with an **ISP programmer (USBasp)**. The usual USB/serial upload (XLoader, Arduino IDE "Upload") will **not** work.
-
 ---
 
-## Download
+## Download — two versions
 
-Get **`ATS_EX_v1.18m.hex`** from the **[Releases](../../releases)** page, or build it yourself (see [Building](#building)).
+Download from the **[Releases](../../releases)** page:
+
+| File | Flash with | Size | Features |
+|---|---|---|---|
+| **`ATS_EX_v1.18m_USB.hex`** | **The radio's USB cable** (XLoader / avrdude), like the original firmware. No programmer needed. | 30.0 KB | Everything **except memory presets and RDS clock** |
+| **`ATS_EX_v1.18m.hex`** | **USBasp** (ISP programmer). Removes the USB bootloader. | 31.3 KB | **All** features |
+
+**Not sure which?** Take the **USB** version. You can switch to the full version later if you get a USBasp.
+
+Both versions store settings the same way, so switching between them is safe.
+
+You can also build them yourself (see [Building](#building)).
 
 ---
 
 ## What's new
 
 ### New features
-| Feature | Description |
-|---|---|
-| **Battery in volts** | Lower-right corner shows battery voltage, e.g. `3.9V`. Setting **Bat** switches between `V` and `%`. |
-| **Low battery warning** | The battery value is shown **inverted** (white box) when the battery drops below **3.30 V**. |
-| **FM stereo indicator** | The top line shows `FM ST` while a stereo station is received. |
-| **Signal numbers in S-meter** | The S-meter line shows bars plus numbers: `||||||  R45 SN12` = RSSI 45 dBµV, SNR 12 dB. |
-| **Screen-off timer** | Setting **Dsp**: turn the display off after 10…120 s without use (0 = never). Any key or encoder turn wakes it up; that key does nothing else. |
-| **More SW band jumps** | BAND+/BAND− in SW now steps through all broadcast bands (120 m … 11 m) as well as the ham bands. |
-| **10 memory presets** | Store and recall favourite stations (band, mode, frequency). See [Memory presets](#memory-presets). |
-| **RDS clock** | A 4th RDS page shows local time `Time hh:mm` from the station's RDS time signal. |
-| **New boot screen** | Shows the version and a loading bar. |
+| Feature | Description | USB | USBasp |
+|---|---|:-:|:-:|
+| **Battery in volts** | Lower-right corner shows battery voltage, e.g. `3.9V`. Setting **Bat** switches between `V` and `%`. | ✅ | ✅ |
+| **Low battery warning** | The battery value is shown **inverted** (white box) when the battery drops below **3.30 V**. | ✅ | ✅ |
+| **FM stereo indicator** | The top line shows `FM ST` while a stereo station is received. | ✅ | ✅ |
+| **Signal numbers in S-meter** | The S-meter line shows bars plus numbers: `||||||  R45 SN12` = RSSI 45 dBµV, SNR 12 dB. | ✅ | ✅ |
+| **Screen-off timer** | Setting **Dsp**: turn the display off after 10…120 s without use (0 = never). Any key or encoder turn wakes it up; that key does nothing else. | ✅ | ✅ |
+| **More SW band jumps** | BAND+/BAND− in SW now steps through all broadcast bands (120 m … 11 m) as well as the ham bands. | ✅ | ✅ |
+| **New boot screen** | Shows the version and a loading bar. | ✅ | ✅ |
+| **All bug fixes** | See below. | ✅ | ✅ |
+| **10 memory presets** | Store and recall favourite stations (band, mode, frequency). See [Memory presets](#memory-presets). | — | ✅ |
+| **RDS clock** | A 4th RDS page shows local time `Time hh:mm` from the station's RDS time signal. | — | ✅ |
 
 ### Bug fixes
 - **RDS could corrupt CPU state:** the library returns `NULL` for RDS groups it didn't decode, and the old code wrote into that pointer, which on AVR is CPU register r17. This caused random glitches on FM. RDS text is now also cut to 16 characters and cleared when you change station.
@@ -41,7 +51,7 @@ Get **`ATS_EX_v1.18m.hex`** from the **[Releases](../../releases)** page, or bui
 - Building with `USE_RDS 0` works again.
 
 ### Changed behaviour
-- **Long-press MODE** now opens memory presets. Previously it acted like a short press.
+- **Long-press MODE** now opens memory presets in the USBasp version. Previously it acted like a short press, and it still does in the USB version.
 - **Settings page 3** has two new items, **Bat** and **Dsp**.
 - The first boot after flashing resets settings to defaults, because the settings layout changed.
 
@@ -50,6 +60,8 @@ Get **`ATS_EX_v1.18m.hex`** from the **[Releases](../../releases)** page, or bui
 ## Controls (new and changed only)
 
 ### Memory presets
+*(USBasp version only)*
+
 | Action | Result |
 |---|---|
 | **Long-press MODE** | Open memory presets. The lower line shows e.g. `M3  9650k AM` (or `M3 ----` if empty). |
@@ -62,7 +74,7 @@ Presets are stored apart from the settings, so they **survive an EEPROM reset**.
 
 ### RDS pages (FM)
 Short-press **MODE** in FM to turn RDS on, then press the **encoder** to cycle through:
-**Station name → Station info → Radio text → Time**
+**Station name → Station info → Radio text → Time**. The **Time** page is in the USBasp version only.
 
 The time shows `Time --:--` until the station sends its time signal. Stations send it once a minute, and not all stations send it. After that the radio keeps the time on its own.
 
@@ -100,7 +112,32 @@ If no divider is connected (A1 reads low at power-on), the battery indicator sta
 
 ---
 
-## Flashing with USBasp
+## Flashing over USB (USB version)
+
+This works like the original ATS_EX firmware. You only need the radio's USB cable.
+
+1. **Switch the radio on first**, then connect it to the PC. A **USB 3.0** port helps, because it supplies more current.
+2. Find the COM port: Windows **Device Manager → Ports (COM & LPT)**, e.g. `USB-SERIAL CH340 (COM5)`. If no port appears, install the **CH340** driver.
+3. Flash using **one** of these:
+   - **XLoader** (Windows GUI):
+     1. Hex file: `ATS_EX_v1.18m_USB.hex`
+     2. Device: **Uno(ATmega328)** or **Nano(ATmega328)**. Try the other one if it fails.
+     3. Select your COM port, then press **Upload**.
+   - **flash-usb.ps1** from this repo (uses the avrdude that comes with Arduino IDE; it tries both bootloader speeds):
+     ```powershell
+     .\flash-usb.ps1 -Port COM5 -Hex ATS_EX_v1.18m_USB.hex
+     ```
+   - **avrdude** directly. Use `-b 115200` for new bootloaders and Uno-type boards, or `-b 57600` for old Nano bootloaders:
+     ```bash
+     avrdude -c arduino -p m328p -P COM5 -b 115200 -U flash:w:ATS_EX_v1.18m_USB.hex:i
+     ```
+4. **Reset settings:** hold the **encoder button** while switching the radio on.
+
+If flashing fails, see "My receiver fails to flash" in [README_ORIGINAL.md](README_ORIGINAL.md).
+
+---
+
+## Flashing with USBasp (full version)
 
 ### 1. Connect the USBasp
 Connect the USBasp's 6-pin (or 10-pin) ISP cable to the ATmega328P ISP pins: the ICSP header on Nano boards, or the matching pads on Uno-type ATS-20 boards.
@@ -145,9 +182,25 @@ You need **Arduino IDE 2.x** (or arduino-cli) with:
 
 Then run, on Windows PowerShell:
 ```powershell
-.\build.ps1
+.\build.ps1          # full version  -> build\ATS_EX.ino.hex      (USBasp, max 32768 bytes)
+.\build.ps1 -Usb     # USB version   -> build-usb\ATS_EX.ino.hex  (bootloader, max 30720 bytes)
 ```
-The output is `build\ATS_EX.ino.hex`.
+
+The USB version is the same source built with `-DUSB_BUILD=1`, which turns off `FEATURE_MEMORY` and `FEATURE_RDS_CLOCK`. Every feature has a switch in `ATS_EX/defs.h`, so you can choose your own set:
+
+| Switch | Flash cost |
+|---|---|
+| `FEATURE_MEMORY` | ~710 B |
+| `FEATURE_RDS_CLOCK` | ~690 B |
+| `FEATURE_SCREEN_TIMEOUT` | ~230 B |
+| `FEATURE_STEREO` | ~145 B |
+| `FEATURE_SMETER_NUMBERS` | ~80 B |
+
+For example, to build with memory presets but no RDS clock:
+```powershell
+arduino-cli compile ... --build-property "compiler.cpp.extra_flags=-mcall-prologues -mrelax -DFEATURE_RDS_CLOCK=0"
+```
+To stay USB-flashable, keep the size at **30,720 bytes or less**.
 
 `build.ps1` compiles with `-mcall-prologues -mrelax`, which saves about 750 bytes, and allows the full 32 KB.
 A plain Arduino IDE build is **too big**, because the IDE doesn't use these flags and reserves space for the bootloader.

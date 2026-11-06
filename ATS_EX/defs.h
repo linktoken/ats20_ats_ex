@@ -4,6 +4,28 @@
 //and everything related to RDS will be excluded from build
 #define USE_RDS 1
 
+//Optional features (1 = on, 0 = off). The USB build (build-usb.ps1 passes
+//-DUSB_BUILD=1) turns the bigger ones off so the firmware fits next to the
+//USB bootloader (max 30720 bytes). Each one can also be forced with -D.
+#ifndef USB_BUILD
+#define USB_BUILD 0
+#endif
+#ifndef FEATURE_MEMORY          //10 memory presets (long press MODE)
+#define FEATURE_MEMORY          (!USB_BUILD)
+#endif
+#ifndef FEATURE_RDS_CLOCK       //RDS clock page
+#define FEATURE_RDS_CLOCK       (!USB_BUILD)
+#endif
+#ifndef FEATURE_SCREEN_TIMEOUT  //Screen-off timer (setting "Dsp")
+#define FEATURE_SCREEN_TIMEOUT  1
+#endif
+#ifndef FEATURE_STEREO          //FM stereo indicator "ST"
+#define FEATURE_STEREO          1
+#endif
+#ifndef FEATURE_SMETER_NUMBERS  //RSSI/SNR numbers in S-meter
+#define FEATURE_SMETER_NUMBERS  1
+#endif
+
 #define EEPROM_APP_ID				235
 #define EEPROM_DATA_START_ADDRESS	1
 #define EEPROM_VERSION_ADDRESS      1000

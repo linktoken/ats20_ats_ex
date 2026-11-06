@@ -26,4 +26,10 @@ Note: long-press MODE no longer acts like a short press (it opens memory presets
   (`BATTERY_VREF_MV`, `BATTERY_DIVIDER`).
 - `USE_RDS 0` build works again.
 
-Size: 32,094 / 32,768 bytes (USBasp, no bootloader). Does not fit with a USB bootloader.
+## Two versions
+- **Full (USBasp):** 32,094 / 32,768 bytes, no bootloader. `build.ps1`, flash with `flash.ps1`.
+- **USB:** 30,694 / 30,720 bytes, keeps the bootloader. Same as full but without memory presets
+  and the RDS clock (long-press MODE = short press, as in the original). `build.ps1 -Usb`, flash with
+  `flash-usb.ps1 -Port COMx` or XLoader.
+- Feature switches in `defs.h`: `FEATURE_MEMORY`, `FEATURE_RDS_CLOCK`, `FEATURE_SCREEN_TIMEOUT`,
+  `FEATURE_STEREO`, `FEATURE_SMETER_NUMBERS` (`USB_BUILD=1` turns off the first two).

@@ -399,3 +399,4 @@ FodyWeavers.xsd
 
 # Local build output (build.ps1)
 build/
+build-usb/

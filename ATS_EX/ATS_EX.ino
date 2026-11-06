@@ -677,7 +677,7 @@ void switchSettings()
 void showModulation()
 {
     oledPrint(g_bandModeDesc[g_currentMode], 0, 0, DEFAULT_FONT, g_cmdBand && g_currentMode == FM);
-    if (g_currentMode == FM)
+    if (FEATURE_STEREO && g_currentMode == FM)
         oled.print(g_fmStereo ? "ST" : "  "); //FM stereo indicator: "FM ST"
     else
     {
@@ -694,7 +694,7 @@ void showModulation()
 //Lower display line is taken by S-meter, RDS or memory presets
 bool lowerLineBusy()
 {
-    return g_sMeterOn || g_displayRDS || g_cmdMemory;
+    return g_sMeterOn || g_displayRDS || (FEATURE_MEMORY && g_cmdMemory);
 }
 
 //Draw current band
@@ -843,7 +843,7 @@ void showRDS()
         if (g_rdsSwitchPressed)
         {
             g_rdsActiveInfo++;
-            if (g_rdsActiveInfo > RDSActiveInfo::Clock)
+            if (g_rdsActiveInfo > (FEATURE_RDS_CLOCK ? RDSActiveInfo::Clock : RDSActiveInfo::ProgramInfo))
                 g_rdsActiveInfo = RDSActiveInfo::StationName;
         }
         else
@@ -859,8 +859,11 @@ void showRDS()
     lastUpdatedFreq = g_currentFrequency;
 
     if (!succeed)
-    {
         g_si4735.getRdsStatus();
+
+#if FEATURE_RDS_CLOCK
+    if (!succeed)
+    {
         //Time signal (group 4A) comes once a minute: check every group we read
         //getRdsTime() gives "hh:mm Shh:mm" = UTC + offset. It is much smaller than
         //getRdsDateTime() (no date math). Note: the library prints the offset sign
@@ -886,6 +889,7 @@ void showRDS()
         convertToChar(&g_clockText[8], m % 60, 2, 0, 0, '0');
     }
     g_RDSCells[RDSActiveInfo::Clock] = g_clockText;
+#endif
 
     if (!succeed && g_si4735.getRdsReceived() && g_si4735.getRdsSync() && g_si4735.getNumRdsFifoUsed() > 1)
     {
@@ -988,11 +992,18 @@ void showSMeter()
 
     g_si4735.getCurrentReceivedSignalQuality();
     uint8_t rssi = g_si4735.getCurrentRSSI();
+    char buf[17];
+#if !FEATURE_SMETER_NUMBERS
+    //Original: 16 bars
+    uint8_t sMeterValue = (rssi > 64 ? 64 : rssi) / 4;
+    for (uint8_t i = 0; i < 16; i++)
+        buf[i] = i < sMeterValue ? '|' : ' ';
+    buf[16] = 0;
+#else
     uint8_t snr = g_si4735.getCurrentSNR();
 
     //"||||||  R45 SN12": 8 bars (0..64 dBuV), RSSI in dBuV, SNR in dB
     uint8_t bars = (rssi > 64 ? 64 : rssi) / 8;
-    char buf[17];
     for (uint8_t i = 0; i < 8; i++)
         buf[i] = i < bars ? '|' : ' ';
     buf[8] = 'R';
@@ -1001,6 +1012,7 @@ void showSMeter()
     buf[12] = 'S';
     buf[13] = 'N';
     convertToChar(&buf[14], snr > 99 ? 99 : snr, 2);
+#endif
 
     oledPrint(buf, 0, 6, DEFAULT_FONT);
     sMeterUpdated = millis();
@@ -1566,11 +1578,13 @@ void doCWSwitch(int8_t v = 0)
         applyBandConfiguration(true);
 }
 
+#if FEATURE_SCREEN_TIMEOUT
 //Settings: Screen timeout, 0..120 seconds in steps of 10 (0 - never)
 void doScreenTimeout(int8_t v)
 {
     doSwitchLogic(g_Settings[SettingsIndex::ScreenTimeout].param, 0, 120, 10 * v);
 }
+#endif
 
 //Settings: Battery indicator units (percent or volts)
 void doBatUnits(int8_t v = 0)
@@ -1663,7 +1677,7 @@ void switchCommand(bool* b, void (*showFunction)())
         g_cmdStep = false;
         g_cmdBw = false;
         g_cmdBand = false;
-        if (g_cmdMemory)
+        if (FEATURE_MEMORY && g_cmdMemory)
         {
             g_cmdMemory = false;
             updateLowerDisplayLine();
@@ -1830,9 +1844,11 @@ void loop()
             showSMeter();
 
         showCharge(false);
-        pollStereo();
+        if (FEATURE_STEREO)
+            pollStereo();
     }
 
+#if FEATURE_SCREEN_TIMEOUT
     //Screen timeout: any key or encoder turn counts as activity
     {
         bool anyKey = (PIND & 0xF0) != 0xF0  //D4..D7
@@ -1865,6 +1881,7 @@ void loop()
             g_autoOff = true;
         }
     }
+#endif
 
     if (g_lastAdjustmentTime != 0 && millis() - g_lastAdjustmentTime > ADJUSTMENT_ACTIVE_TIMEOUT)
         switchCommand(NULL, NULL);
@@ -1919,7 +1936,7 @@ void loop()
             else
                 bandSwitch(false);
         }
-        else if (g_cmdMemory)
+        else if (FEATURE_MEMORY && g_cmdMemory)
         {
             doSwitchLogic(g_memSlot, 0, MEMORY_SLOTS - 1, g_encoderCount);
             showMemory();
@@ -1991,7 +2008,7 @@ void loop()
     }
     if (BUTTONEVENT_SHORTPRESS == btn_Encoder.checkEvent(simpleEvent))
     {
-        if (g_cmdMemory)
+        if (FEATURE_MEMORY && g_cmdMemory)
             memoryRecall();
         else if (g_cmdBand)
         {
@@ -2079,15 +2096,16 @@ void loop()
                 updateLowerDisplayLine();
         }
     }
-    uint8_t modeEvent = btn_Mode.checkEvent(NULL);
+    //Without memory presets a long press acts as a short press (original behaviour)
+    uint8_t modeEvent = btn_Mode.checkEvent(FEATURE_MEMORY ? NULL : simpleEvent);
     //Long press MODE: open/close memory presets
-    if (BUTTONEVENT_FIRSTLONGPRESS == modeEvent && !g_settingsActive)
+    if (FEATURE_MEMORY && BUTTONEVENT_FIRSTLONGPRESS == modeEvent && !g_settingsActive)
     {
         resetLowerLine();
         switchCommand(&g_cmdMemory, showMemory);
     }
     //Short press MODE in memory: store current station into selected slot
-    else if (BUTTONEVENT_SHORTPRESS == modeEvent && g_cmdMemory)
+    else if (FEATURE_MEMORY && BUTTONEVENT_SHORTPRESS == modeEvent && g_cmdMemory)
         memoryStore();
     else if (BUTTONEVENT_SHORTPRESS == modeEvent)
     {
