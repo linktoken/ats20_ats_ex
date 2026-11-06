@@ -477,136 +477,56 @@ void updateLowerDisplayLine()
 void SettingParamToUI(char* buf, uint8_t idx)
 {
     int8_t param = g_Settings[idx].param;
+    //3-character labels, in pairs (value 0, value 1). One table + memcpy is much
+    //smaller than assigning every character by hand.
+    static const char labels[] =
+        "Off" "On "   // 0: generic switch
+        "50u" "75u"   // 2: DeEmp
+        "kHz" "MHz"   // 4: SWUnits
+        "RSS" "SNR"   // 6: SSM
+        "LSB" "USB"   // 8: CWSwitch
+        "100" "50%"   //10: CPUSpeed
+        "  %" "  V"   //12: BatUnits
+        "AUT";        //14: auto
+    uint8_t label = 0xFF; //0xFF: numeric value
+
     switch (g_Settings[idx].type)
     {
     case SettingType::ZeroAuto:
         if (param == 0)
-        {
-            buf[0] = 'A';
-            buf[1] = 'U';
-            buf[2] = 'T';
-            buf[3] = 0x0;
-        }
-        else
-            convertToChar(buf, param, 3);
-
+            label = 14;
         break;
 
     case SettingType::Num:
-        convertToChar(buf, abs(param), 3);
-        if (param < 0)
-            buf[0] = '-';
         break;
 
-    case SettingType::SwitchAuto:
-        if (param == 0)
-        {
-            buf[0] = 'A';
-            buf[1] = 'U';
-            buf[2] = 'T';       }
-        else if (param == 1)
-        {
-            buf[0] = 'O';
-            buf[1] = 'n';
-            buf[2] = ' ';
-        }
-        else
-        {
-            buf[0] = 'O';
-            buf[1] = 'f';
-            buf[2] = 'f';
-        }
-        buf[3] = 0x0;
+    case SettingType::SwitchAuto: //0: AUT, 1: On, 2: Off
+        label = param == 0 ? 14 : (param == 1 ? 1 : 0);
         break;
 
     case SettingType::Switch:
-        if (idx == SettingsIndex::DeEmp)
-        {
-            if (param == 0)
-            {
-                buf[0] = '5';
-                buf[1] = '0';
-                buf[2] = 'u';
-            }
-            else
-            {
-                buf[0] = '7';
-                buf[1] = '5';
-                buf[2] = 'u';
-            }
-        }
-        else if (idx == SettingsIndex::SWUnits)
-        {
-            if (param == 0)
-                buf[0] = 'k';
-            else
-                buf[0] = 'M';
-            buf[1] = 'H';
-            buf[2] = 'z';
-        }
-        else if (idx == SettingsIndex::SSM)
-        {
-            if (param == 0)
-            {
-                buf[0] = 'R';
-                buf[1] = 'S';
-                buf[2] = 'S';
-            }
-            else
-            {
-                buf[0] = 'S';
-                buf[1] = 'N';
-                buf[2] = 'R';
-            }
-        }
-        else if (idx == SettingsIndex::CWSwitch)
-        {
-            if (param == 0)
-                buf[0] = 'L';
-            else
-                buf[0] = 'U';
-
-            buf[1] = 'S';
-            buf[2] = 'B';
-        }
-        else if (idx == SettingsIndex::BatUnits)
-        {
-            buf[0] = ' ';
-            buf[1] = ' ';
-            buf[2] = param == 0 ? '%' : 'V';
-        }
-        else if (idx == SettingsIndex::CPUSpeed)
-        {
-            if (param == 0)
-            {
-                buf[0] = '1';
-                buf[1] = '0';
-                buf[2] = '0';
-            }
-            else
-            {
-                buf[0] = '5';
-                buf[1] = '0';
-                buf[2] = '%';
-            }
-        }
-        else
-        {
-            if (param == 0)
-            {
-                buf[0] = 'O';
-                buf[1] = 'f';
-                buf[2] = 'f';
-            }
-            else
-            {
-                buf[0] = 'O';
-                buf[1] = 'n';
-                buf[2] = ' ';
-            }
-        }
-        buf[3] = 0x0;
+        label = idx == SettingsIndex::DeEmp    ? 2
+              : idx == SettingsIndex::SWUnits  ? 4
+              : idx == SettingsIndex::SSM      ? 6
+              : idx == SettingsIndex::CWSwitch ? 8
+              : idx == SettingsIndex::CPUSpeed ? 10
+              : idx == SettingsIndex::BatUnits ? 12
+              : 0;
+        if (param != 0)
+            label++;
         break;
+    }
+
+    if (label == 0xFF)
+    {
+        convertToChar(buf, abs(param), 3);
+        if (param < 0)
+            buf[0] = '-';
+    }
+    else
+    {
+        memcpy(buf, &labels[label * 3], 3);
+        buf[3] = 0x0;
     }
 }
 
@@ -635,12 +555,11 @@ void showSettings()
 
 void showSettingsTitle()
 {
-    oledPrint("   SETTINGS  ", 0, 0, DEFAULT_FONT, true);
-    oled.invertOutput(true);
-    oled.print(uint8_t(g_SettingsPage));
-    oled.print("/");
-    oled.print(uint8_t(g_SettingsMaxPages));
-    oled.invertOutput(false);
+    //"   SETTINGS  1/3" built by hand: avoids linking Print's number printing (~200 bytes)
+    char title[] = "   SETTINGS  1/3";
+    title[13] = '0' + g_SettingsPage;
+    title[15] = '0' + g_SettingsMaxPages;
+    oledPrint(title, 0, 0, DEFAULT_FONT, true);
 }
 
 void switchSettingsPage()
@@ -739,7 +658,8 @@ void showCharge(bool forceShow)
     //Battery millivolts are converted to ADC units at compile time using
     //BATTERY_VREF_MV and BATTERY_DIVIDER from defs.h (no runtime cost)
     constexpr const uint8_t rows = 10;
-    const uint16_t dischargeTable[rows][2] =
+    //static: stored once instead of being rebuilt on the stack every call (saves flash)
+    static const uint16_t dischargeTable[rows][2] =
     {
         { BATT_MV(4150), 100 },
         { BATT_MV(4000), 95  },
@@ -761,18 +681,15 @@ void showCharge(bool forceShow)
         if (currentSamples <= dischargeTable[rows - 1][0]) 
             return 0;
 
-        for (uint8_t i = 0; i < rows - 1; ++i) 
-        {
-            if (currentSamples >= dischargeTable[i + 1][0] && currentSamples <= dischargeTable[i][0]) 
-            {
-                uint16_t voltageDiff = dischargeTable[i][0] - dischargeTable[i + 1][0];
-                uint16_t percentageDiff = dischargeTable[i][1] - dischargeTable[i + 1][1];
-                uint16_t voltageOffset = currentSamples - dischargeTable[i + 1][0];
-                return dischargeTable[i + 1][1] + (percentageDiff * voltageOffset + voltageDiff / 2) / voltageDiff;
-            }
-        }
-
-        return 0;
+        //Table is descending and both ends are handled above,
+        //so the first row whose next value is <= the sample is the segment
+        uint8_t i = 0;
+        while (currentSamples < dischargeTable[i + 1][0])
+            i++;
+        uint16_t voltageDiff = dischargeTable[i][0] - dischargeTable[i + 1][0];
+        uint16_t percentageDiff = dischargeTable[i][1] - dischargeTable[i + 1][1];
+        uint16_t voltageOffset = currentSamples - dischargeTable[i + 1][0];
+        return dischargeTable[i + 1][1] + (percentageDiff * voltageOffset + voltageDiff / 2) / voltageDiff;
     };
 
     static uint32_t lastChargeShow = 0;
@@ -799,14 +716,15 @@ void showCharge(bool forceShow)
         }
         else
         {
-            buf[3] = 0;
-            int16_t percents = getBatteryPercentage(averageSamples);
-
-            uint8_t il = ilen(percents) < 3 ? 2 : 3;
-            convertToChar(buf, percents, il);
-
-            if (il < 3)
+            //"85%" or "100"
+            uint8_t percents = getBatteryPercentage(averageSamples);
+            convertToChar(buf, percents, 3);
+            if (percents < 100)
+            {
+                buf[0] = buf[1];
+                buf[1] = buf[2];
                 buf[2] = '%';
+            }
         }
 
         //Low battery warning: inverted (white box) below 3.30 V
@@ -864,18 +782,25 @@ void showRDS()
 #if FEATURE_RDS_CLOCK
     if (!succeed)
     {
-        //Time signal (group 4A) comes once a minute: check every group we read
-        //getRdsTime() gives "hh:mm Shh:mm" = UTC + offset. It is much smaller than
-        //getRdsDateTime() (no date math). Note: the library prints the offset sign
-        //inverted vs the RDS spec ('+' means local = UTC - offset), so subtract on '+'.
-        char* t = g_si4735.getRdsReceived() ? g_si4735.getRdsTime() : NULL;
-        if (t)
+        //Time signal (group 4A) comes once a minute: check every group we read.
+        //Decoded straight from the raw blocks (much smaller than the library's
+        //getRdsTime()/getRdsDateTime()):
+        //  block C bit 0       = UTC hour bit 4
+        //  block D bits 15..12 = UTC hour bits 3..0, bits 11..6 = minute,
+        //          bit 5 = offset sign (1 = negative), bits 4..0 = offset in half hours
+        if (g_si4735.getRdsReceived() && g_si4735.getRdsGroupType() == 4)
         {
-#define RDS_D2(p) (((p)[0] - '0') * 10 + ((p)[1] - '0'))
-            int16_t offset = RDS_D2(t + 7) * 60 + RDS_D2(t + 10);
-            int16_t m = RDS_D2(t) * 60 + RDS_D2(t + 3) + (t[6] == '+' ? -offset : offset);
-            g_clockMinutes = (m + 1440) % 1440;
-            g_clockBase = millis();
+            const si47x_rds_status& s = g_si4735.rdsStatus();
+            uint16_t d = (uint16_t(s.resp.BLOCKDH) << 8) | s.resp.BLOCKDL;
+            uint8_t hour = ((s.resp.BLOCKCL & 1) << 4) | (d >> 12);
+            uint8_t minute = (d >> 6) & 0x3F;
+            if (hour < 24 && minute < 60)
+            {
+                int16_t offset = (d & 0x1F) * 30;
+                int16_t m = hour * 60 + minute + ((d & 0x20) ? -offset : offset);
+                g_clockMinutes = (m + 1440) % 1440;
+                g_clockBase = millis();
+            }
         }
     }
 
@@ -942,41 +867,17 @@ void showStep()
         return;
 
     char buf[5];
-    if (g_currentMode == FM)
-    {
-        if (g_tabStepFM[g_FMStepIndex] == 100)
-        {
-            buf[0] = ' ';
-            buf[1] = ' ';
-            buf[2] = '1';
-            buf[3] = 'M';
-            buf[4] = 0x0;
-        }
-        else
-        {
-            convertToChar(buf, g_tabStepFM[g_FMStepIndex] * 10, 3);
-            buf[3] = 'k';
-            buf[4] = '\0';
-        }
-    }
+    //Step in kHz (FM table is in 10 kHz units); SSB fine steps are in Hz
+    uint16_t step = g_currentMode == FM ? g_tabStepFM[g_FMStepIndex] * 10 : g_tabStep[g_stepIndex];
+    if (step == 1000)
+        memcpy(buf, "  1M", 5);
+    else if (g_currentMode != FM && isSSB() && g_stepIndex >= g_amTotalSteps)
+        convertToChar(buf, step, 4);
     else
     {
-        if (g_tabStep[g_stepIndex] == 1000)
-        {
-            buf[0] = ' ';
-            buf[1] = ' ';
-            buf[2] = '1';
-            buf[3] = 'M';
-            buf[4] = 0x0;
-        }
-        else if (isSSB() && g_stepIndex >= g_amTotalSteps)
-            convertToChar(buf, g_tabStep[g_stepIndex], 4);
-        else
-        {
-            convertToChar(buf, g_tabStep[g_stepIndex], 3);
-            buf[3] = 'k';
-            buf[4] = '\0';
-        }
+        convertToChar(buf, step, 3);
+        buf[3] = 'k';
+        buf[4] = '\0';
     }
 
     uint8_t off = 50;

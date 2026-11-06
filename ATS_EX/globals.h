@@ -328,4 +328,11 @@ bool g_processFreqChange = 0;
 uint8_t g_volume = DEFAULT_VOLUME;
 
 Rotary g_encoder = Rotary(ENCODER_PIN_A, ENCODER_PIN_B);
-SI4735 g_si4735;
+//Gives read access to the last raw RDS group (the library keeps it protected),
+//so the RDS clock can be decoded directly without the library's text formatting.
+class ATS_SI4735 : public SI4735
+{
+public:
+    const si47x_rds_status& rdsStatus() { return currentRdsStatus; }
+};
+ATS_SI4735 g_si4735;

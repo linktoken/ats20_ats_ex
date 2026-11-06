@@ -15,8 +15,8 @@ Download from the **[Releases](../../releases)** page:
 
 | File | Flash with | Size | Features |
 |---|---|---|---|
-| **`ATS_EX_v1.18m_USB.hex`** | **The radio's USB cable** (XLoader / avrdude), like the original firmware. No programmer needed. | 30.0 KB | Everything **except memory presets and RDS clock** |
-| **`ATS_EX_v1.18m.hex`** | **USBasp** (ISP programmer). Removes the USB bootloader. | 31.3 KB | **All** features |
+| **`ATS_EX_v1.18m_USB.hex`** | **The radio's USB cable** (XLoader / avrdude), like the original firmware. No programmer needed. | 29.9 KB | Everything, including the **RDS clock**, **except memory presets**. The S-meter shows bars only. |
+| **`ATS_EX_v1.18m.hex`** | **USBasp** (ISP programmer). Removes the USB bootloader. | 30.7 KB | **All** features |
 
 **Not sure which?** Take the **USB** version. You can switch to the full version later if you get a USBasp.
 
@@ -34,13 +34,13 @@ You can also build them yourself (see [Building](#building)).
 | **Battery in volts** | Lower-right corner shows battery voltage, e.g. `3.9V`. Setting **Bat** switches between `V` and `%`. | ✅ | ✅ |
 | **Low battery warning** | The battery value is shown **inverted** (white box) when the battery drops below **3.30 V**. | ✅ | ✅ |
 | **FM stereo indicator** | The top line shows `FM ST` while a stereo station is received. | ✅ | ✅ |
-| **Signal numbers in S-meter** | The S-meter line shows bars plus numbers: `||||||  R45 SN12` = RSSI 45 dBµV, SNR 12 dB. | ✅ | ✅ |
+| **Signal numbers in S-meter** | The S-meter line shows bars plus numbers: `||||||  R45 SN12` = RSSI 45 dBµV, SNR 12 dB. | — (bars) | ✅ |
 | **Screen-off timer** | Setting **Dsp**: turn the display off after 10…120 s without use (0 = never). Any key or encoder turn wakes it up; that key does nothing else. | ✅ | ✅ |
 | **More SW band jumps** | BAND+/BAND− in SW now steps through all broadcast bands (120 m … 11 m) as well as the ham bands. | ✅ | ✅ |
 | **New boot screen** | Shows the version and a loading bar. | ✅ | ✅ |
 | **All bug fixes** | See below. | ✅ | ✅ |
 | **10 memory presets** | Store and recall favourite stations (band, mode, frequency). See [Memory presets](#memory-presets). | — | ✅ |
-| **RDS clock** | A 4th RDS page shows local time `Time hh:mm` from the station's RDS time signal. | — | ✅ |
+| **RDS clock** | A 4th RDS page shows local time `Time hh:mm` from the station's RDS time signal. | ✅ | ✅ |
 
 ### Bug fixes
 - **RDS could corrupt CPU state:** the library returns `NULL` for RDS groups it didn't decode, and the old code wrote into that pointer, which on AVR is CPU register r17. This caused random glitches on FM. RDS text is now also cut to 16 characters and cleared when you change station.
@@ -74,12 +74,12 @@ Presets are stored apart from the settings, so they **survive an EEPROM reset**.
 
 ### RDS pages (FM)
 Short-press **MODE** in FM to turn RDS on, then press the **encoder** to cycle through:
-**Station name → Station info → Radio text → Time**. The **Time** page is in the USBasp version only.
+**Station name → Station info → Radio text → Time** (both versions).
 
 The time shows `Time --:--` until the station sends its time signal. Stations send it once a minute, and not all stations send it. After that the radio keeps the time on its own.
 
 ### S-meter
-Long-press **STEP** as before. The new layout is `||||||||R45 SN12`:
+Long-press **STEP** as before. The USB version shows 16 bars, as in the original firmware. The USBasp version uses the new layout `||||||||R45 SN12`:
 - 8 bars for 0…64 dBµV
 - **R** = RSSI in dBµV
 - **SN** = signal-to-noise ratio in dB
@@ -186,17 +186,17 @@ Then run, on Windows PowerShell:
 .\build.ps1 -Usb     # USB version   -> build-usb\ATS_EX.ino.hex  (bootloader, max 30720 bytes)
 ```
 
-The USB version is the same source built with `-DUSB_BUILD=1`, which turns off `FEATURE_MEMORY` and `FEATURE_RDS_CLOCK`. Every feature has a switch in `ATS_EX/defs.h`, so you can choose your own set:
+The USB version is the same source built with `-DUSB_BUILD=1`, which turns off `FEATURE_MEMORY` and `FEATURE_SMETER_NUMBERS`. Every feature has a switch in `ATS_EX/defs.h`, so you can choose your own set:
 
 | Switch | Flash cost |
 |---|---|
 | `FEATURE_MEMORY` | ~710 B |
-| `FEATURE_RDS_CLOCK` | ~690 B |
+| `FEATURE_RDS_CLOCK` | ~340 B |
 | `FEATURE_SCREEN_TIMEOUT` | ~230 B |
 | `FEATURE_STEREO` | ~145 B |
 | `FEATURE_SMETER_NUMBERS` | ~80 B |
 
-For example, to build with memory presets but no RDS clock:
+For example, to build with memory presets but no RDS clock (this is still too big for USB):
 ```powershell
 arduino-cli compile ... --build-property "compiler.cpp.extra_flags=-mcall-prologues -mrelax -DFEATURE_RDS_CLOCK=0"
 ```

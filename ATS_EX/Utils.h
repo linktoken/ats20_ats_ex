@@ -23,18 +23,6 @@ void oledPrint(const char* text, int offX = -1, int offY = -1, const DCfont* fon
         oled.invertOutput(false);
 }
 
-void oledPrint(uint16_t u, int offX = -1, int offY = -1, const DCfont* font = LastFont, bool invert = false)
-{
-    oledSetFont(font);
-    if (invert)
-        oled.invertOutput(invert);
-    if (offX >= 0 && offY >= 0)
-        oled.setCursor(offX, offY);
-    oled.print(u);
-    if (invert)
-        oled.invertOutput(false);
-}
-
 //Faster alternative for convertToChar
 void utoa(char* out, uint16_t num)
 {

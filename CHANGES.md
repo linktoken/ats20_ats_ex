@@ -27,9 +27,10 @@ Note: long-press MODE no longer acts like a short press (it opens memory presets
 - `USE_RDS 0` build works again.
 
 ## Two versions
-- **Full (USBasp):** 32,094 / 32,768 bytes, no bootloader. `build.ps1`, flash with `flash.ps1`.
-- **USB:** 30,694 / 30,720 bytes, keeps the bootloader. Same as full but without memory presets
-  and the RDS clock (long-press MODE = short press, as in the original). `build.ps1 -Usb`, flash with
-  `flash-usb.ps1 -Port COMx` or XLoader.
+- **Full (USBasp):** 31,438 / 32,768 bytes, no bootloader. `build.ps1`, flash with `flash.ps1`.
+- **USB:** 30,648 / 30,720 bytes, keeps the bootloader. Same as full, including the RDS clock, but
+  without memory presets (long-press MODE = short press, as in the original) and with a bars-only
+  S-meter. `build.ps1 -Usb`, flash with `flash-usb.ps1 -Port COMx` or XLoader.
 - Feature switches in `defs.h`: `FEATURE_MEMORY`, `FEATURE_RDS_CLOCK`, `FEATURE_SCREEN_TIMEOUT`,
-  `FEATURE_STEREO`, `FEATURE_SMETER_NUMBERS` (`USB_BUILD=1` turns off the first two).
+  `FEATURE_STEREO`, `FEATURE_SMETER_NUMBERS` (`USB_BUILD=1` turns off memory and S-meter numbers).
+- RDS clock decodes the raw RDS group 4A (~350 bytes smaller than the library's time functions).
