@@ -241,6 +241,13 @@ Options in `ATS_EX/defs.h`:
 - The USB version has only 72 bytes of flash left, so new features would need something else turned off.
 - Not tested on every ATS-20 hardware revision. Please report issues.
 
+## Tested on
+| Radio | Bootloader | Version | Flashed with | Result |
+|---|---|---|---|---|
+| ATS-20 (CH340 USB-serial, battery divider on A1) | Optiboot (115200 baud) | v1.18m **USB** | USB cable, avrdude | ✅ Works |
+
+The USBasp version has not been tested on hardware yet.
+
 ---
 
 ## Credits & license
