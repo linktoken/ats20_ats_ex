@@ -60,7 +60,8 @@ int getLastStep()
 // ------- Main logic -------
 // --------------------------
 
-#define APP_VERSION 118
+//119: new "Bat" setting added (forces a clean EEPROM layout on first boot)
+#define APP_VERSION 119
 
 //Initialize controller
 void setup()
@@ -94,10 +95,15 @@ void setup()
     else
     {
         oledPrint(" ATS-20 RECEIVER", 0, 0, DEFAULT_FONT, true);
-        oledPrint("ATS_EX v1.18", 16, 2);
-        oledPrint("Goshante 2024", 12, 4);
-        oledPrint("Best firmware", 12, 6);
-        delay(2000);
+        oledPrint("linktoken v1.18m", 0, 2);
+        oledPrint("edit firmware", 12, 4);
+        //Loading bar: 16 solid blocks (inverted spaces) over ~2 s
+        oled.setCursor(0, 6);
+        for (uint8_t i = 0; i < 16; i++)
+        {
+            oledPrint(" ", -1, -1, DEFAULT_FONT, true);
+            delay(125);
+        }
     }
     oled.clear();
 
@@ -111,7 +117,9 @@ void setup()
     delay(500);
 
     //Load settings from EEPROM
-    if (EEPROM.read(EEPROM_VERSION_ADDRESS) == APP_VERSION && EEPROM.read(EEPROM_APP_ID_ADDRESS) == EEPROM_APP_ID)
+    //Also reject a corrupted band/mode byte so it can't index past the tables
+    if (EEPROM.read(EEPROM_VERSION_ADDRESS) == APP_VERSION && EEPROM.read(EEPROM_APP_ID_ADDRESS) == EEPROM_APP_ID
+        && EEPROM.read(EEPROM_DATA_START_ADDRESS + 1) <= g_lastBand && EEPROM.read(EEPROM_DATA_START_ADDRESS + 2) <= FM)
         readAllReceiverInformation();
     else
         saveAllReceiverInformation();
@@ -177,18 +185,6 @@ uint8_t simpleEvent(uint8_t event, uint8_t pin)
     if (BUTTONEVENT_FIRSTLONGPRESS == event)
         event = BUTTONEVENT_SHORTPRESS;
     return event;
-}
-
-//This looks like it's better to remove them and use only simpleEvent
-//But it's a part of a hack that allows us to save more flash image size
-uint8_t stepEvent(uint8_t event, uint8_t pin)
-{
-    return simpleEvent(event, pin);
-}
-
-uint8_t agcEvent(uint8_t event, uint8_t pin)
-{
-    return simpleEvent(event, pin);
 }
 
 uint8_t bandEvent(uint8_t event, uint8_t pin)
@@ -283,14 +279,18 @@ void readAllReceiverInformation()
     g_volume = EEPROM.read(addr++);
     g_bandIndex = EEPROM.read(addr++);
     g_currentMode = EEPROM.read(addr++);
-    g_currentBFO = (EEPROM.read(addr++) << 8) | EEPROM.read(addr++);
+    //Read high byte first in a separate statement: the order of the two reads
+    //inside one expression is unspecified in C++
+    g_currentBFO = EEPROM.read(addr++) << 8;
+    g_currentBFO |= EEPROM.read(addr++);
     g_FMStepIndex = EEPROM.read(addr++);
     g_prevMode = EEPROM.read(addr++);
     g_bwIndexSSB = EEPROM.read(addr++);
 
     for (uint8_t i = 0; i <= g_lastBand; i++)
     {
-        g_bandList[i].currentFreq = (EEPROM.read(addr++) << 8) | EEPROM.read(addr++);
+        g_bandList[i].currentFreq = EEPROM.read(addr++) << 8;
+        g_bandList[i].currentFreq |= EEPROM.read(addr++);
         g_bandList[i].currentStepIdx = EEPROM.read(addr++);
         g_bandList[i].bandwidthIdx = EEPROM.read(addr++);
     }
@@ -569,6 +569,12 @@ void SettingParamToUI(char* buf, uint8_t idx)
             buf[1] = 'S';
             buf[2] = 'B';
         }
+        else if (idx == SettingsIndex::BatUnits)
+        {
+            buf[0] = ' ';
+            buf[1] = ' ';
+            buf[2] = param == 0 ? '%' : 'V';
+        }
         else if (idx == SettingsIndex::CPUSpeed)
         {
             if (param == 0)
@@ -671,19 +677,30 @@ void switchSettings()
 void showModulation()
 {
     oledPrint(g_bandModeDesc[g_currentMode], 0, 0, DEFAULT_FONT, g_cmdBand && g_currentMode == FM);
+    if (g_currentMode == FM)
+        oled.print(g_fmStereo ? "ST" : "  "); //FM stereo indicator: "FM ST"
+    else
+    {
     oled.print(" ");
     if (isSSB() && g_Settings[SettingsIndex::Sync].param == 1)
         oledPrint("S", -1, -1, LastFont, true);
     else
         oled.print(" ");
+    }
 
     showBandTag();
+}
+
+//Lower display line is taken by S-meter, RDS or memory presets
+bool lowerLineBusy()
+{
+    return g_sMeterOn || g_displayRDS || g_cmdMemory;
 }
 
 //Draw current band
 void showBandTag()
 {
-    if (g_sMeterOn || g_displayRDS)
+    if (lowerLineBusy())
         return;
 
     oledPrint((g_currentFrequency >= CB_LIMIT_LOW && g_currentFrequency < CB_LIMIT_HIGH)? "CB" : bandTags[g_bandIndex], 0, 6, DEFAULT_FONT, g_cmdBand && g_currentMode != FM);
@@ -711,28 +728,29 @@ void showVolume()
 //Draw battery charge
 //This feature requires hardware mod
 //Voltage divider made of two 10 KOhm resistors between + and GND of Li-Ion battery
-//Solder it to A2 analog pin
+//Solder it to A1 analog pin (BATTERY_VOLTAGE_PIN in defs.h)
+#define BATT_MV(mv) uint16_t(uint32_t(mv) * 1023 / BATTERY_DIVIDER / BATTERY_VREF_MV)
 void showCharge(bool forceShow)
 {
     if (!g_voltagePinConnnected)
         return;
 
-    // mV, Percent
-    //This values represent voltage values in ATMega328p analog units with reference voltage 3.30v
-    //Voltage pin reads voltage from voltage divider, so it have to be 1/2 of Li-Ion battery voltage
+    // ADC units, Percent
+    //Battery millivolts are converted to ADC units at compile time using
+    //BATTERY_VREF_MV and BATTERY_DIVIDER from defs.h (no runtime cost)
     constexpr const uint8_t rows = 10;
     const uint16_t dischargeTable[rows][2] =
     {
-        { 643, 100 },  //4.15v
-        { 620, 95  },  //4.05v
-        { 604, 90  },  //3.90v
-        { 581, 80  },  //3.75v
-        { 573, 60  },  //3.70v
-        { 558, 40  },  //3.60v
-        { 542, 20  },  //3.50v
-        { 503, 15  },  //3.25v
-        { 496, 5  },   //3.20v
-        { 488, 0  },   //3.15v
+        { BATT_MV(4150), 100 },
+        { BATT_MV(4000), 95  },
+        { BATT_MV(3900), 90  },
+        { BATT_MV(3750), 80  },
+        { BATT_MV(3700), 60  },
+        { BATT_MV(3600), 40  },
+        { BATT_MV(3500), 20  },
+        { BATT_MV(3250), 15  },
+        { BATT_MV(3200), 5   },
+        { BATT_MV(3150), 0   },
     };
 
     auto getBatteryPercentage = [&](uint16_t currentSamples) -> uint8_t
@@ -760,24 +778,40 @@ void showCharge(bool forceShow)
     static uint32_t lastChargeShow = 0;
     static int16_t averageSamples = 0;
 
-    int sample = analogRead(BATTERY_VOLTAGE_PIN);
-    if (sample < 0)
-        sample = averageSamples;
+    int16_t sample = analogRead(BATTERY_VOLTAGE_PIN);
+    if (averageSamples == 0) //First call: start from a real reading, not 0%
+        averageSamples = sample;
 
     if ((millis() - lastChargeShow) > 10000 || forceShow)
     {
-        char buf[4];
-        buf[3] = 0;
-        int16_t percents = getBatteryPercentage(averageSamples);
+        char buf[5];
+        uint8_t x = 102;
+        if (g_Settings[SettingsIndex::BatUnits].param == 1)
+        {
+            //Battery voltage in tenths of a volt, rounded: "3.9V"
+            uint8_t dv = (uint32_t(averageSamples) * (BATTERY_VREF_MV * BATTERY_DIVIDER) / 1023 + 50) / 100;
+            buf[0] = '0' + dv / 10;
+            buf[1] = '.';
+            buf[2] = '0' + dv % 10;
+            buf[3] = 'V';
+            buf[4] = 0;
+            x = 94; //4 characters: start earlier so it ends at the screen edge
+        }
+        else
+        {
+            buf[3] = 0;
+            int16_t percents = getBatteryPercentage(averageSamples);
 
-        uint8_t il = ilen(percents) < 3 ? 2 : 3;
-        convertToChar(buf, percents, il);
+            uint8_t il = ilen(percents) < 3 ? 2 : 3;
+            convertToChar(buf, percents, il);
 
-        if (il < 3)
-            buf[2] = '%';
+            if (il < 3)
+                buf[2] = '%';
+        }
 
-        if (!g_settingsActive && !g_sMeterOn && !g_displayRDS)
-            oledPrint(buf, 102, 6, DEFAULT_FONT);
+        //Low battery warning: inverted (white box) below 3.30 V
+        if (!g_settingsActive && !lowerLineBusy())
+            oledPrint(buf, x, 6, DEFAULT_FONT, averageSamples < BATT_MV(3300));
         lastChargeShow = millis();
         averageSamples = sample;
     }
@@ -809,13 +843,15 @@ void showRDS()
         if (g_rdsSwitchPressed)
         {
             g_rdsActiveInfo++;
-            if (g_rdsActiveInfo > RDSActiveInfo::ProgramInfo)
+            if (g_rdsActiveInfo > RDSActiveInfo::Clock)
                 g_rdsActiveInfo = RDSActiveInfo::StationName;
         }
         else
         {
             g_rdsActiveInfo = RDSActiveInfo::StationName;
             succeed = false;
+            //New station: forget text from the previous one
+            g_RDSCells[0] = g_RDSCells[1] = g_RDSCells[2] = NULL;
         }
         g_rdsPrevLen = 0;
         oledPrint(_literal_EmptyLine, 0, 6, DEFAULT_FONT);
@@ -823,27 +859,67 @@ void showRDS()
     lastUpdatedFreq = g_currentFrequency;
 
     if (!succeed)
+    {
         g_si4735.getRdsStatus();
+        //Time signal (group 4A) comes once a minute: check every group we read
+        //getRdsTime() gives "hh:mm Shh:mm" = UTC + offset. It is much smaller than
+        //getRdsDateTime() (no date math). Note: the library prints the offset sign
+        //inverted vs the RDS spec ('+' means local = UTC - offset), so subtract on '+'.
+        char* t = g_si4735.getRdsReceived() ? g_si4735.getRdsTime() : NULL;
+        if (t)
+        {
+#define RDS_D2(p) (((p)[0] - '0') * 10 + ((p)[1] - '0'))
+            int16_t offset = RDS_D2(t + 7) * 60 + RDS_D2(t + 10);
+            int16_t m = RDS_D2(t) * 60 + RDS_D2(t + 3) + (t[6] == '+' ? -offset : offset);
+            g_clockMinutes = (m + 1440) % 1440;
+            g_clockBase = millis();
+        }
+    }
+
+    //Running clock text "Time hh:mm"
+    if (g_clockMinutes >= 0)
+    {
+        //At 50% CPU speed millis() runs at half speed
+        uint16_t m = (g_clockMinutes + (((millis() - g_clockBase) << g_Settings[SettingsIndex::CPUSpeed].param) / 60000UL)) % 1440;
+        convertToChar(&g_clockText[5], m / 60, 2, 0, 0, '0');
+        g_clockText[7] = ':';
+        convertToChar(&g_clockText[8], m % 60, 2, 0, 0, '0');
+    }
+    g_RDSCells[RDSActiveInfo::Clock] = g_clockText;
 
     if (!succeed && g_si4735.getRdsReceived() && g_si4735.getRdsSync() && g_si4735.getNumRdsFifoUsed() > 1)
     {
-        g_RDSCells[RDSActiveInfo::StationName] = g_si4735.getRdsStationName();
-        g_RDSCells[RDSActiveInfo::StationInfo] = g_si4735.getRdsStationInformation();
-        g_RDSCells[RDSActiveInfo::ProgramInfo] = g_si4735.getRdsProgramInformation();
-        g_RDSCells[RDSActiveInfo::StationInfo][17] = '\0';
-        g_RDSCells[RDSActiveInfo::ProgramInfo][17] = '\0';
+        //The library returns NULL for every RDS group type except the one it just decoded.
+        //Keep the last good text and never write through a NULL pointer
+        //(on AVR address 17 is CPU register r17, so the old code corrupted CPU state).
+        char* cells[3] =
+        {
+            g_si4735.getRdsStationName(),
+            g_si4735.getRdsStationInformation(),
+            g_si4735.getRdsProgramInformation()
+        };
+        for (uint8_t i = 0; i < 3; i++)
+        {
+            if (cells[i])
+            {
+                if (i != RDSActiveInfo::StationName) //Station name buffer is only 9 bytes
+                    cells[i][16] = '\0';             //Fit 16 characters on the line
+                g_RDSCells[i] = cells[i];
+            }
+        }
         succeed = true;
         lastUpdatedTime = millis();
     }
     else if (!g_rdsSwitchPressed && succeed)
         return;
 
-    uint8_t len = strlen8(g_RDSCells[g_rdsActiveInfo]);
+    const char* text = g_RDSCells[g_rdsActiveInfo] ? g_RDSCells[g_rdsActiveInfo] : "";
+    uint8_t len = strlen8(text);
 
     if (len == 0 && !g_rdsSwitchPressed)
         return;
 
-    oledPrint(g_RDSCells[g_rdsActiveInfo], 0, 6, DEFAULT_FONT);
+    oledPrint(text, 0, 6, DEFAULT_FONT);
     
     uint8_t toPrint = len == 0 ? 3 : (len < g_rdsPrevLen ? min(g_rdsPrevLen - len, 16 - len) : 0);
     char printChar = len == 0 ? '.' : ' ';
@@ -858,7 +934,7 @@ void showRDS()
 //Draw steps (with units)
 void showStep()
 {
-    if (g_sMeterOn || g_displayRDS)
+    if (lowerLineBusy())
         return;
 
     char buf[5];
@@ -912,16 +988,145 @@ void showSMeter()
 
     g_si4735.getCurrentReceivedSignalQuality();
     uint8_t rssi = g_si4735.getCurrentRSSI();
-    rssi = rssi > 64 ? 64 : rssi;
+    uint8_t snr = g_si4735.getCurrentSNR();
 
-    int sMeterValue = rssi / (64 / 16);
+    //"||||||  R45 SN12": 8 bars (0..64 dBuV), RSSI in dBuV, SNR in dB
+    uint8_t bars = (rssi > 64 ? 64 : rssi) / 8;
     char buf[17];
-    for (uint8_t i = 0; i < sizeof(buf) - 1; i++)
-        buf[i] = i < sMeterValue ? '|' : ' ';
-    buf[sizeof(buf) - 1] = 0x0;
+    for (uint8_t i = 0; i < 8; i++)
+        buf[i] = i < bars ? '|' : ' ';
+    buf[8] = 'R';
+    convertToChar(&buf[9], rssi > 99 ? 99 : rssi, 2);
+    buf[11] = ' ';
+    buf[12] = 'S';
+    buf[13] = 'N';
+    convertToChar(&buf[14], snr > 99 ? 99 : snr, 2);
 
     oledPrint(buf, 0, 6, DEFAULT_FONT);
     sMeterUpdated = millis();
+}
+
+// --------------------------
+// ----- Memory presets -----
+// --------------------------
+//Long press MODE: open memory, rotate encoder: choose slot M0..M9,
+//encoder button: recall, short press MODE: store current station.
+
+uint16_t memAddr()
+{
+    return EEPROM_MEMORY_ADDRESS + g_memSlot * 4;
+}
+
+uint16_t memFreq(uint16_t a)
+{
+    uint16_t f = EEPROM.read(a + 2) << 8;
+    f |= EEPROM.read(a + 3);
+    return f;
+}
+
+//Draws "M3  9650k AM" on the lower line (or restores the line when closed)
+void showMemory()
+{
+    if (!g_cmdMemory)
+    {
+        updateLowerDisplayLine();
+        return;
+    }
+
+    char buf[17];
+    memset(buf, ' ', 16);
+    buf[16] = 0;
+    buf[0] = 'M';
+    buf[1] = '0' + g_memSlot;
+
+    uint16_t a = memAddr();
+    uint8_t band = EEPROM.read(a);
+    uint8_t mode = EEPROM.read(a + 1);
+    if (band > g_lastBand || mode > FM)
+        memset(&buf[3], '-', 4); //Empty slot
+    else
+    {
+        uint16_t f = memFreq(a);
+        if (band == FM_BAND_TYPE)
+        {
+            convertToChar(&buf[3], f, 5, 3, '.'); //" 87.50"
+            buf[9] = 'M';
+        }
+        else
+        {
+            convertToChar(&buf[3], f, 5);         //" 9650"
+            buf[8] = 'k';
+        }
+        memcpy(&buf[11], g_bandModeDesc[mode], 3);
+    }
+
+    oledPrint(buf, 0, 6, DEFAULT_FONT);
+}
+
+void memoryStore()
+{
+    uint16_t a = memAddr();
+    uint16_t f = g_bandList[g_bandIndex].currentFreq;
+    EEPROM.update(a, g_bandIndex);
+    EEPROM.update(a + 1, g_currentMode);
+    EEPROM.update(a + 2, f >> 8);
+    EEPROM.update(a + 3, f & 0xFF);
+    g_lastAdjustmentTime = millis(); //Keep memory line open a bit so you see it was stored
+    showMemory();
+}
+
+void memoryRecall()
+{
+    uint16_t a = memAddr();
+    uint8_t band = EEPROM.read(a);
+    uint8_t mode = EEPROM.read(a + 1);
+    if (band > g_lastBand || mode > FM)
+        return; //Empty slot
+
+    switchCommand(NULL, NULL); //Close memory line
+
+    //Remember step of the band we are leaving (same as bandSwitch)
+    if (g_currentMode == FM)
+        g_bandList[g_bandIndex].currentStepIdx = g_FMStepIndex;
+    else
+        g_bandList[g_bandIndex].currentStepIdx = g_stepIndex;
+
+    g_bandIndex = band;
+    g_bandList[band].currentFreq = memFreq(a);
+    g_currentBFO = 0;
+
+    if (band != FM_BAND_TYPE && mode != AM && mode != FM)
+    {
+        if (!g_ssbLoaded)
+            loadSSBPatch();
+        g_currentMode = mode;
+    }
+    else
+    {
+        g_ssbLoaded = false;
+        //SSB uses Hz steps above g_amTotalSteps, AM can't
+        if (band != FM_BAND_TYPE && g_bandList[band].currentStepIdx >= g_amTotalSteps)
+            g_bandList[band].currentStepIdx = 0;
+    }
+
+    applyBandConfiguration();
+}
+
+//FM stereo indicator: poll the pilot detector twice a second
+void pollStereo()
+{
+    static uint32_t lastPoll = 0;
+    if (g_currentMode != FM || g_settingsActive || millis() - lastPoll < 500)
+        return;
+    lastPoll = millis();
+
+    g_si4735.getCurrentReceivedSignalQuality();
+    bool stereo = g_si4735.getCurrentPilot();
+    if (stereo != g_fmStereo)
+    {
+        g_fmStereo = stereo;
+        showModulation();
+    }
 }
 
 //Draw bandwidth (Ignored for CW mode)
@@ -1335,13 +1540,9 @@ void doBFOCalibration(int8_t v)
 {
     doSwitchLogic(g_Settings[SettingsIndex::BFO].param, -60, 60, v);
 
+    //(Removed: a stray setRDSConfig() call here sent the BFO value to the RDS block)
     if (isSSB())
-    {
-#if USE_RDS
-        setRDSConfig(g_Settings[SettingsIndex::BFO].param);
-#endif
         updateBFO();
-    }
 }
 
 //Settings: Tune Frequency Antenna Capacitor
@@ -1365,6 +1566,18 @@ void doCWSwitch(int8_t v = 0)
         applyBandConfiguration(true);
 }
 
+//Settings: Screen timeout, 0..120 seconds in steps of 10 (0 - never)
+void doScreenTimeout(int8_t v)
+{
+    doSwitchLogic(g_Settings[SettingsIndex::ScreenTimeout].param, 0, 120, 10 * v);
+}
+
+//Settings: Battery indicator units (percent or volts)
+void doBatUnits(int8_t v = 0)
+{
+    doSwitchLogic(g_Settings[SettingsIndex::BatUnits].param, 0, 1, v);
+}
+
 #if USE_RDS
 //Settings: RDS Error Level
 void doRDSErrorLevel(int8_t v)
@@ -1374,7 +1587,6 @@ void doRDSErrorLevel(int8_t v)
     if (g_currentMode == FM)
         setRDSConfig(g_Settings[SettingsIndex::RDSError].param);
 }
-
 
 void doRDS()
 {
@@ -1393,14 +1605,14 @@ void doRDS()
 #endif
 
 //Prevents repeatable code for flash image size saving
-void doBandwidthLogic(int8_t& bwIndex, uint8_t upperLimit, uint8_t v)
+void doBandwidthLogic(int8_t& bwIndex, uint8_t upperLimit, int8_t v)
 {
     doSwitchLogic(bwIndex, 0, upperLimit, v);
     g_bandList[g_bandIndex].bandwidthIdx = bwIndex;
 }
 
 //Bandwidth regulation logic
-void doBandwidth(uint8_t v)
+void doBandwidth(int8_t v)
 {
     if (isSSB())
     {
@@ -1451,6 +1663,11 @@ void switchCommand(bool* b, void (*showFunction)())
         g_cmdStep = false;
         g_cmdBw = false;
         g_cmdBand = false;
+        if (g_cmdMemory)
+        {
+            g_cmdMemory = false;
+            updateLowerDisplayLine();
+        }
         g_lastAdjustmentTime = millis();
         showVolume();
         showStep();
@@ -1613,6 +1830,40 @@ void loop()
             showSMeter();
 
         showCharge(false);
+        pollStereo();
+    }
+
+    //Screen timeout: any key or encoder turn counts as activity
+    {
+        bool anyKey = (PIND & 0xF0) != 0xF0  //D4..D7
+                   || (PINB & 0x0F) != 0x0F  //D8..D11
+                   || !(PINC & 0x01);        //A0 (encoder button)
+        if (anyKey || g_encoderCount != 0)
+        {
+            g_lastActivity = millis();
+            if (g_autoOff) //Wake up: this key/turn only turns the display back on
+            {
+                g_autoOff = false;
+                g_displayOn = true;
+                oled.on();
+                g_wakeHold = true;
+                g_encoderCount = 0;
+            }
+        }
+        if (g_wakeHold)
+        {
+            if (anyKey)
+                return; //Wait until the waking key is released
+            g_wakeHold = false;
+        }
+
+        uint8_t timeout = g_Settings[SettingsIndex::ScreenTimeout].param;
+        if (timeout && g_displayOn && millis() - g_lastActivity > timeout * 1000UL)
+        {
+            oled.off();
+            g_displayOn = false;
+            g_autoOff = true;
+        }
     }
 
     if (g_lastAdjustmentTime != 0 && millis() - g_lastAdjustmentTime > ADJUSTMENT_ACTIVE_TIMEOUT)
@@ -1667,6 +1918,11 @@ void loop()
                 bandSwitch(true);
             else
                 bandSwitch(false);
+        }
+        else if (g_cmdMemory)
+        {
+            doSwitchLogic(g_memSlot, 0, MEMORY_SLOTS - 1, g_encoderCount);
+            showMemory();
         }
         else if (isSSB())
         {
@@ -1735,7 +1991,9 @@ void loop()
     }
     if (BUTTONEVENT_SHORTPRESS == btn_Encoder.checkEvent(simpleEvent))
     {
-        if (g_cmdBand)
+        if (g_cmdMemory)
+            memoryRecall();
+        else if (g_cmdBand)
         {
             g_cmdBand = false;
             showModulation();
@@ -1775,11 +2033,10 @@ void loop()
             doSeek();
     }
 
-    //This is a hack, it allows SHORTPRESS and LONGPRESS events
-    //Be processed without complicated overhead
-    //It requires to save checkEvent result into a variable
-    //That has exact same name as event processing function for this button
-    uint8_t agcEvent = btn_AGC.checkEvent(agcEvent);
+    //No callback: get raw SHORTPRESS / LONGPRESS / LONGPRESSDONE events.
+    //(The old code passed its own uninitialized variable as the callback
+    //pointer, so a button event could jump to a random flash address.)
+    uint8_t agcEvent = btn_AGC.checkEvent(NULL);
     if (BUTTONEVENT_SHORTPRESS == agcEvent)
     {
         if (!g_settingsActive || g_settingsActive && !g_displayOn)
@@ -1799,7 +2056,7 @@ void loop()
                 doSync(1);
         }
     }
-    uint8_t stepEvent = btn_Step.checkEvent(stepEvent);
+    uint8_t stepEvent = btn_Step.checkEvent(NULL);
     if (BUTTONEVENT_SHORTPRESS == stepEvent)
     {
         if (!g_settingsActive)
@@ -1822,7 +2079,17 @@ void loop()
                 updateLowerDisplayLine();
         }
     }
-    if (BUTTONEVENT_SHORTPRESS == btn_Mode.checkEvent(simpleEvent))
+    uint8_t modeEvent = btn_Mode.checkEvent(NULL);
+    //Long press MODE: open/close memory presets
+    if (BUTTONEVENT_FIRSTLONGPRESS == modeEvent && !g_settingsActive)
+    {
+        resetLowerLine();
+        switchCommand(&g_cmdMemory, showMemory);
+    }
+    //Short press MODE in memory: store current station into selected slot
+    else if (BUTTONEVENT_SHORTPRESS == modeEvent && g_cmdMemory)
+        memoryStore();
+    else if (BUTTONEVENT_SHORTPRESS == modeEvent)
     {
         if (!g_settingsActive)
         {

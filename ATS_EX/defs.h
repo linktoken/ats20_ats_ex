@@ -8,6 +8,10 @@
 #define EEPROM_DATA_START_ADDRESS	1
 #define EEPROM_VERSION_ADDRESS      1000
 #define EEPROM_APP_ID_ADDRESS       0
+//Memory presets: 10 slots x 4 bytes (band, mode, freq hi, freq lo).
+//Kept outside the settings area, so an EEPROM reset doesn't erase them.
+#define EEPROM_MEMORY_ADDRESS       900
+#define MEMORY_SLOTS                10
 
 //EEPROM Settings
 #define STORE_TIME 10000 // Inactive time to save our settings
@@ -18,7 +22,12 @@
 #define RESET_PIN 12
 
 //Battery charge monitoring analog pin (Voltage divider 10-10 KOhm directly from battery)
-#define BATTERY_VOLTAGE_PIN A2
+#define BATTERY_VOLTAGE_PIN A1
+//Calibration: the ATmega supply voltage that the ADC uses as reference (mV)
+//and the divider ratio (10k/10k = 2). If the % reads wrong, measure the
+//5V/3.3V pin of the ATmega with a multimeter and put the value here.
+#define BATTERY_VREF_MV   3300
+#define BATTERY_DIVIDER   2
 
 // Encoder
 #define ENCODER_PIN_A 2

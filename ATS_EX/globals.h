@@ -4,7 +4,12 @@ long g_storeTime = millis();
 
 bool g_voltagePinConnnected = false;
 bool g_ssbLoaded = false;
-bool g_fmStereo = true;
+bool g_fmStereo = false;     //FM pilot detected (shows "ST")
+bool g_cmdMemory = false;    //Memory preset mode active
+int8_t g_memSlot = 0;        //Selected memory slot 0..9
+bool g_autoOff = false;      //Display was turned off by the screen timeout
+bool g_wakeHold = false;     //Ignore the key that woke the display until it's released
+uint32_t g_lastActivity = 0; //Last button/encoder activity (for screen timeout)
 
 bool g_cmdVolume = false;
 bool g_cmdStep = false;
@@ -72,6 +77,8 @@ void doBFOCalibration(int8_t v);
 void doUnitsSwitch(int8_t v = 0);
 void doScanSwitch(int8_t v = 0);
 void doCWSwitch(int8_t v = 0);
+void doBatUnits(int8_t v = 0);
+void doScreenTimeout(int8_t v);
 
 SettingsItem g_Settings[] =
 {
@@ -96,6 +103,8 @@ SettingsItem g_Settings[] =
     { "Uni", 1,  SettingType::Switch,       doUnitsSwitch     },  //Show/Hide frequency units
     { "Sca", 1,  SettingType::Switch,       doScanSwitch      },  //AM Encoder scan switch
     { "CW ", 0,  SettingType::Switch,       doCWSwitch        },  //CW is LSB or USB
+    { "Bat", 1,  SettingType::Switch,       doBatUnits        },  //Battery: 0 - percent, 1 - volts
+    { "Dsp", 0,  SettingType::Num,          doScreenTimeout   },  //Screen off after N seconds (0 - never)
 };
 
 enum SettingsIndex
@@ -118,6 +127,8 @@ enum SettingsIndex
     UnitsSwitch,
     ScanSwitch,
     CWSwitch,
+    BatUnits,
+    ScreenTimeout,
     SETTINGS_MAX
 };
 
@@ -223,11 +234,17 @@ enum RDSActiveInfo : uint8_t
 {
     StationName,
     StationInfo,
-    ProgramInfo
+    ProgramInfo,
+    Clock
 };
 uint8_t g_rdsActiveInfo = RDSActiveInfo::StationName;
 char g_rdsPrevLen = 0;
-char* g_RDSCells[3];
+char* g_RDSCells[4];
+//RDS clock: local minutes of day from the last time signal (-1: none yet),
+//then kept running with millis()
+int16_t g_clockMinutes = -1;
+uint32_t g_clockBase = 0;
+char g_clockText[11] = "Time --:--";
 #endif
 
 char _literal_EmptyLine[17] = "                ";
@@ -250,25 +267,31 @@ Band g_bandList[] =
 
 uint16_t SWSubBands[] =
 {
-    SW_LIMIT_LOW,  // 160 Meter
-    3500, // 80 Meter
-    4500, 
-    5600,
-    6800, // 40 Meter
-    7200, // 41 Meter
-    8500, 
-    10000, // 30 Meter
-    11200,
-    13400, 
-    14000, // 20 Meter
-    15000,
-    17200, 
-    18000, // 17 Meter
-    21000, // 15 Meter
-    21400, // 13 Meter
-    24890, // 12 Meter
+    //Must stay sorted ascending. BC = broadcast band, HAM = amateur band
+    SW_LIMIT_LOW,  // 160m HAM
+    2300,  // 120m BC
+    3200,  // 90m BC
+    3500,  // 80m HAM
+    3900,  // 75m BC
+    4750,  // 60m BC
+    5900,  // 49m BC
+    7000,  // 40m HAM
+    7200,  // 41m BC
+    9400,  // 31m BC
+    10100, // 30m HAM
+    11600, // 25m BC
+    13570, // 22m BC
+    14000, // 20m HAM
+    15100, // 19m BC
+    17480, // 16m BC
+    18068, // 17m HAM
+    18900, // 15m BC
+    21000, // 15m HAM
+    21450, // 13m BC
+    24890, // 12m HAM
+    25670, // 11m BC
     CB_LIMIT_LOW, // CB Band (11 Meter)
-    CB_LIMIT_HIGH  // 10 Meter
+    CB_LIMIT_HIGH  // 10m HAM
 };
 const uint8_t g_SWSubBandCount = sizeof(SWSubBands) / sizeof(uint16_t);
 const uint8_t g_lastBand = (sizeof(g_bandList) / sizeof(Band)) - 1;
